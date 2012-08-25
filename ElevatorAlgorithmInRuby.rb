@@ -1,4 +1,4 @@
-class InQ
+class InputQFromOutside
     def initialize
 		@user_input =  Array.new  #level, direction
 		@input_queue = Array.new([@user_input])
@@ -26,7 +26,7 @@ end
 
 class Elevator
     def initialize
-        @service_cnt = 1
+        @service_cnt = 0
 		@level = Array.new(4,0)					#contains level for current status, SR1, SR2, SR3
         @direction = Array.new(4,0)				#contains direction for current status, SR1, SR2, SR3
 		@user_destination = Array.new(29,0)		#user input information for	
@@ -48,6 +48,7 @@ class Elevator
 			if @direction[index]==0
 				@direction[index]= dir
 				@level[index] = lev
+				@service_cnt = @service_cnt+1 
 				break
 			else	
 				next
@@ -65,6 +66,22 @@ class Elevator
 	def set_user_destination(index,value)
 		@user_destination[index] = value
 	end
+
+	def get_user_destination
+		if (dir == 2) #down
+			for index in 29 ... 0
+				if @user_destination[index] then return index end
+			end
+		elsif (dir == 1) #up 
+			for index in 0 ... 29
+				if @user_destination[index] then return index end
+			end		
+		else
+			puts "System failure"
+		end	
+		if !@user_destination[index] then return -1 end
+	end
+
 	def get_service_cnt
 		return @service_cnt
 	end
@@ -76,7 +93,7 @@ class Elevator
 	end
 	def dispatch_pending_elv
 		# if there is a service request, dispatch it
-		if @serivce_cntr
+		if (@serivce_cntr)
 		puts "dispatch"
 			for index in 1 ... 3
 				if @direction[index]!=0
@@ -85,8 +102,9 @@ class Elevator
 					#invoke low level function to dispatch elevator eg : dispatch_elv (@level[0],@direction[0])
 					#if status is success, clear the corresponding service request
 					@level[index] = @direction[index] = 0
+					@serivce_cntr= @serivce_cntr-1 
 				else	
-					break;
+					break
 				end
 			end	
 		end
@@ -94,7 +112,7 @@ class Elevator
 end
 
 $elevators = [Elevator.new, Elevator.new, Elevator.new]
-$input = InQ.new	
+$ext_input = InputQFromOutside.new	
 
 
 def find_closest_elv lev	
@@ -184,25 +202,61 @@ def set_elevator_idle_levels
 end
 
 #Main thread
-set_elevator_idle_levels 
 
 #user input from outside the elevator
-$input.set_user_input(28,1) #dummy value lev 28, dir Down 
-$input.set_user_input(23,2) #dummy value lev 23, dir Down 
-$input.set_user_input(27,2) #dummy value lev 27, dir Down 
-$input.set_user_input(21,2) #dummy value lev 21, dir Down 
-$input.set_user_input(20,2) #dummy value lev 20, dir Down 
+$ext_input.set_user_input(28,1) #dummy value lev 28, dir Down 
+$ext_input.set_user_input(23,2) #dummy value lev 23, dir Down 
+$ext_input.set_user_input(27,2) #dummy value lev 27, dir Down 
+$ext_input.set_user_input(21,2) #dummy value lev 21, dir Down 
+$ext_input.set_user_input(20,2) #dummy value lev 20, dir Down 
 
+sleep_flag = TRUE
+timer_expiry = FALSE
 while 1
-	#extract the user input
-	#level,direction
-	level , direction = $input.get_user_input
+	
+	sleep_flag ? timer_expiry = FALSE : set_elevator_idle_levels
+	#extract the user input 
+	level , direction = $ext_input.get_user_input
 	break if direction == nil
 	#make the decision
 	#dir - 1 is Up and 2 is Down
 	decision_algo(level ,direction)	
 	#dispatch the elevators to address the SR		
-		$elevators[0].dispatch_pending_elv  
-		$elevators[1].dispatch_pending_elv  
-		$elevators[2].dispatch_pending_elv  
-end	
+	$elevators[0].dispatch_pending_elv  
+	$elevators[1].dispatch_pending_elv  
+	$elevators[2].dispatch_pending_elv  
+	
+	sleep_flag = TRUE
+	#invoke sleep for X minutes here and set the timer_expiry flag accordingly
+	timer_expiry ? sleep_flag = FALSE :  sleep_flag = TRUE
+end
+
+#Create new thread to receive user inputs from inside the elevators, once passenger is on board
+#this thread should run whenever the input is key-ed in by the passenger
+input_recv = Thread.new do
+	def user_internal_input_recv
+		#receive user input from low level function, for selected elevator
+		user_input, elevator_id = 0
+		case user_input 
+			when 0 .. 29
+				$elevators[elevator_id].set_user_destination(user_input, TRUE)
+			else
+				puts "System failure"
+		end		
+	end
+end
+
+#Create new thread to process user inputs parallely
+#this thread should run whenever an elevator is in dispatch state
+input_proc = Thread.new do
+	def user_internal_input_proc
+		#receive user input from low level function, for selected elevator
+		for index in 0 ... 2
+			level = $elevators[index].get_user_destination
+			#if level is valid(0-29), trigger function to set door to open at the level
+			#set_door_to_open(level)
+			#clear the user_destination values
+			$elevators[index].set_user_destination(level, FALSE)
+		end			
+	end
+end
